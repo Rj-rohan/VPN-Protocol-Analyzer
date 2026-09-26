@@ -1,0 +1,26 @@
+{
+  "id": "org-baseline",
+  "name": "Organisation IPsec baseline (example)",
+  "version": "1",
+  "reference": "Example organisational policy; copy to COMPLIANCE_PROFILE_DIR and edit to match your own policy",
+  "description": "A typical internal baseline: IKEv2, AES-GCM, strong DH, PFS, tunnel mode, short lifetimes.",
+  "disclaimer": "Example policy for demonstration; adapt it to your organisation's approved standard.",
+  "controls": [
+    {"id": "ORG-01", "title": "IKEv2 only", "requirement": "All tunnels use IKEv2.", "severity": "High",
+     "check": {"field": "ike_version", "operator": "equals", "value": "IKEv2"}, "remediation": "Migrate to IKEv2."},
+    {"id": "ORG-02", "title": "AES-GCM for IKE", "requirement": "The IKE SA uses AES-GCM.", "severity": "Medium",
+     "check": {"field": "ike_encryption", "operator": "matches", "value": "GCM"}, "remediation": "Use AES-GCM-16 for the IKE SA."},
+    {"id": "ORG-03", "title": "Elliptic-curve or 3072-bit+ key exchange", "requirement": "DH group 15, 16, 19, 20, 21 or 31.", "severity": "Medium",
+     "check": {"field": "dh_group_number", "operator": "in", "value": [15, 16, 19, 20, 21, 31]}, "remediation": "Use DH group 19 or 20."},
+    {"id": "ORG-04", "title": "PFS enabled", "requirement": "Child SAs use PFS.", "severity": "Medium",
+     "check": {"field": "pfs", "operator": "is_true"}, "remediation": "Add a DH group to the ESP proposal."},
+    {"id": "ORG-05", "title": "Tunnel mode", "requirement": "Site-to-site traffic uses tunnel mode.", "severity": "Low",
+     "check": {"field": "mode", "operator": "equals", "value": "Tunnel"}, "remediation": "Configure tunnel mode."},
+    {"id": "ORG-06", "title": "Payload encrypted", "requirement": "No ESP-NULL or AH-only tunnels.", "severity": "Critical",
+     "check": {"field": "payload_encrypted", "operator": "is_true"}, "remediation": "Use an encrypting ESP transform."},
+    {"id": "ORG-07", "title": "AEAD ESP cipher", "requirement": "ESP uses AES-GCM.", "severity": "Medium",
+     "check": {"field": "esp_cipher_family", "operator": "equals", "value": "AEAD (AES-GCM or ChaCha20-Poly1305)"}, "remediation": "Configure AES-GCM for ESP."},
+    {"id": "ORG-08", "title": "IKE SA lifetime at most 8 hours", "requirement": "IKE SA lifetime is 28,800 s or less.", "severity": "Low",
+     "check": {"field": "sa_lifetime_seconds", "operator": "max", "value": 28800}, "remediation": "Shorten the IKE SA lifetime."}
+  ]
+}

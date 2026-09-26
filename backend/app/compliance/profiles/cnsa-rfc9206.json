@@ -1,0 +1,33 @@
+{
+  "id": "cnsa-rfc9206",
+  "name": "CNSA Suite for IPsec (RFC 9206)",
+  "version": "2022",
+  "reference": "RFC 9206, Commercial National Security Algorithm (CNSA) Suite Cryptography for Internet Protocol Security (IPsec)",
+  "description": "High-assurance profile: IKEv2 with AES-256, SHA-384 and ECDH P-384 or DH 3072, and signature authentication.",
+  "controls": [
+    {"id": "CNSA-01", "title": "IKEv2 required", "requirement": "Only IKEv2 is permitted.", "severity": "High",
+     "check": {"field": "ike_version", "operator": "equals", "value": "IKEv2"}, "reference": "RFC 9206", "remediation": "Use IKEv2."},
+    {"id": "CNSA-02", "title": "AES-256 encryption", "requirement": "IKE SA encryption is AES with a 256-bit key.", "severity": "High",
+     "check": {"field": "ike_encryption", "operator": "matches", "value": "^AES-256-"}, "reference": "RFC 9206",
+     "remediation": "Configure AES-256-GCM for IKE."},
+    {"id": "CNSA-03", "title": "SHA-384 PRF", "requirement": "The IKE PRF is HMAC-SHA-384.", "severity": "High",
+     "check": {"field": "ike_prf", "operator": "equals", "value": "HMAC-SHA2-384"}, "reference": "RFC 9206",
+     "remediation": "Configure PRF HMAC-SHA-384."},
+    {"id": "CNSA-04", "title": "AEAD or SHA-384 integrity", "requirement": "Integrity is provided by AES-GCM or HMAC-SHA-384.", "severity": "High",
+     "check": {"field": "ike_integrity", "operator": "matches", "value": "AEAD|SHA2-384"}, "reference": "RFC 9206",
+     "remediation": "Use AES-256-GCM or HMAC-SHA-384."},
+    {"id": "CNSA-05", "title": "P-384 or DH-3072 key exchange", "requirement": "Key exchange uses ECDH P-384 (group 20) or MODP-3072 (group 15).", "severity": "High",
+     "check": {"field": "dh_group_number", "operator": "in", "value": [20, 15]}, "reference": "RFC 9206",
+     "remediation": "Use DH group 20 (ECP-384)."},
+    {"id": "CNSA-06", "title": "AEAD ESP cipher", "requirement": "ESP uses AES-GCM (key length must be confirmed as 256 on the endpoints).", "severity": "Medium",
+     "check": {"field": "esp_cipher_family", "operator": "equals", "value": "AEAD (AES-GCM or ChaCha20-Poly1305)"}, "reference": "RFC 9206",
+     "remediation": "Configure AES-256-GCM for ESP."},
+    {"id": "CNSA-07", "title": "Perfect Forward Secrecy", "requirement": "Child SAs are rekeyed with a fresh key exchange.", "severity": "Medium",
+     "check": {"field": "pfs", "operator": "is_true"}, "reference": "RFC 9206", "remediation": "Enable PFS with group 20."},
+    {"id": "CNSA-08", "title": "Payload confidentiality", "requirement": "ESP encrypts the payload.", "severity": "Critical",
+     "check": {"field": "payload_encrypted", "operator": "is_true"}, "reference": "RFC 9206", "remediation": "Use an encrypting ESP transform."},
+    {"id": "CNSA-09", "title": "No pre-shared keys", "requirement": "Authentication uses ECDSA P-384 or RSA-3072+ signatures, not pre-shared keys.", "severity": "High",
+     "check": {"field": "authentication", "operator": "not_matches", "value": "Pre-Shared|Shared Key"}, "reference": "RFC 9206",
+     "remediation": "Deploy ECDSA P-384 certificates."}
+  ]
+}
