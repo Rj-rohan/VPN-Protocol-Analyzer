@@ -1,0 +1,43 @@
+# Two strongSwan peers on one bridge network. moon initiates, sun responds.
+# Driven by scripts/run_testbed.py; see testbed/README.md.
+name: ipsec-testbed
+
+x-peer: &peer
+  image: ipsec-testbed-strongswan
+  cap_add: [NET_ADMIN]
+  sysctls:
+    net.ipv6.conf.all.disable_ipv6: 0
+
+services:
+  moon:
+    <<: *peer
+    # Only moon builds the shared image; building it from both services races on the same tag.
+    build:
+      context: .
+      dockerfile: strongswan/Dockerfile
+    hostname: moon
+    environment: {ROLE: initiator, INNER_V4: 10.1.0.1/24, INNER_V6: "fd00:1::1/64"}
+    networks:
+      wan: {ipv4_address: 172.30.0.10, ipv6_address: "fd00:30::10"}
+    volumes:
+      - ./generated/moon:/etc/swanctl/conf.d
+      - ../data/raw/testbed:/captures
+      - ../data/raw/traffic_sessions:/sessions
+
+  sun:
+    <<: *peer
+    pull_policy: never
+    hostname: sun
+    environment: {ROLE: responder, INNER_V4: 10.2.0.1/24, INNER_V6: "fd00:2::1/64"}
+    networks:
+      wan: {ipv4_address: 172.30.0.20, ipv6_address: "fd00:30::20"}
+    volumes:
+      - ./generated/sun:/etc/swanctl/conf.d
+
+networks:
+  wan:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+        - subnet: "fd00:30::/64"

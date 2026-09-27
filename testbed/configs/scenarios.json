@@ -1,0 +1,200 @@
+{
+  "_comment": "Each scenario becomes one capture_NNN.pcap + capture_NNN.json. 'ike_proposal'/'esp_proposal' are strongSwan proposal strings; 'truth' holds the expected values using the analyzer's naming.",
+  "scenarios": [
+    {
+      "id": "capture_001",
+      "name": "ikev2-tunnel-aes256gcm-dh14-pfs",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "Video",
+      "ike_proposal": "aes256gcm16-prfsha256-modp2048",
+      "esp_proposal": "aes256gcm16-modp2048",
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "dh_group": "DH14 (MODP-2048)", "pfs": true}
+      }
+    },
+    {
+      "id": "capture_002",
+      "name": "ikev2-tunnel-aes128gcm-dh19-pfs",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "VoIP",
+      "ike_proposal": "aes128gcm16-prfsha256-ecp256",
+      "esp_proposal": "aes128gcm16-ecp256",
+      "truth": {
+        "ike_sa": {"encryption": "AES-128-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH19 (ECP-256)"},
+        "child_sa": {"encryption": "AES-128-GCM-16", "integrity": "AEAD", "dh_group": "DH19 (ECP-256)", "pfs": true}
+      }
+    },
+    {
+      "id": "capture_003",
+      "name": "ikev2-transport-aes256cbc-sha256",
+      "ike_version": 2, "mode": "transport", "ip_version": "IPv4", "encap": false, "traffic": "Web",
+      "ike_proposal": "aes256-sha256-modp2048",
+      "esp_proposal": "aes256-sha256",
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-CBC", "integrity": "HMAC-SHA2-256-128", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "AES-256-CBC", "integrity": "HMAC-SHA2-256-128", "dh_group": null, "pfs": false}
+      }
+    },
+    {
+      "id": "capture_004",
+      "name": "ikev2-tunnel-aes128cbc",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "File-Transfer",
+      "ike_proposal": "aes128-sha256-modp2048",
+      "esp_proposal": "aes128-sha256-modp2048",
+      "truth": {
+        "ike_sa": {"encryption": "AES-128-CBC", "integrity": "HMAC-SHA2-256-128", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "AES-128-CBC", "integrity": "HMAC-SHA2-256-128", "dh_group": "DH14 (MODP-2048)", "pfs": true}
+      }
+    },
+    {
+      "id": "capture_005",
+      "name": "ikev1-legacy-tunnel",
+      "ike_version": 1, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "ICMP",
+      "ike_proposal": "aes128-sha1-modp1024",
+      "esp_proposal": "aes128-sha1-modp1024",
+      "truth": {
+        "ike_sa": {"encryption": "AES-128-CBC", "integrity": "HMAC-SHA1", "prf": null, "dh_group": "DH2 (MODP-1024)", "authentication": "Pre-Shared Key"},
+        "child_sa": {"encryption": "AES-128-CBC", "integrity": "HMAC-SHA1-96", "dh_group": "DH2 (MODP-1024)", "pfs": true}
+      }
+    },
+    {
+      "id": "capture_006",
+      "name": "ikev2-tunnel-no-pfs",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "Chat",
+      "ike_proposal": "aes256gcm16-prfsha256-modp2048",
+      "esp_proposal": "aes256gcm16",
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "dh_group": null, "pfs": false}
+      }
+    },
+    {
+      "id": "capture_007",
+      "name": "ikev2-tunnel-ipv6",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv6", "encap": false, "traffic": "Email",
+      "ike_proposal": "aes256gcm16-prfsha384-ecp384",
+      "esp_proposal": "aes256gcm16-ecp384",
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-384", "dh_group": "DH20 (ECP-384)"},
+        "child_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "dh_group": "DH20 (ECP-384)", "pfs": true}
+      }
+    },
+    {
+      "id": "capture_008",
+      "name": "ikev2-tunnel-nat-t",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": true, "traffic": "Web",
+      "ike_proposal": "aes256gcm16-prfsha256-modp2048",
+      "esp_proposal": "aes256gcm16-modp2048",
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "dh_group": "DH14 (MODP-2048)", "pfs": true}
+      }
+    },
+    {
+      "id": "capture_009",
+      "name": "ikev2-tunnel-esp-null",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "ICMP",
+      "ike_proposal": "aes256gcm16-prfsha256-modp2048",
+      "esp_proposal": "null-sha256",
+      "mode_observable": true,
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "NULL", "integrity": "HMAC-SHA2-256-128", "dh_group": null, "pfs": false}
+      }
+    },
+    {
+      "id": "capture_010",
+      "name": "ikev2-transport-esp-null",
+      "ike_version": 2, "mode": "transport", "ip_version": "IPv4", "encap": false, "traffic": "ICMP",
+      "ike_proposal": "aes256gcm16-prfsha256-modp2048",
+      "esp_proposal": "null-sha256",
+      "mode_observable": true,
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "NULL", "integrity": "HMAC-SHA2-256-128", "dh_group": null, "pfs": false}
+      }
+    },
+    {
+      "id": "capture_011",
+      "name": "ikev2-tunnel-ah-sha256",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "ICMP",
+      "ike_proposal": "aes256gcm16-prfsha256-modp2048",
+      "ah_proposal": "sha256",
+      "mode_observable": true,
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "NONE (AH)", "integrity": "HMAC-SHA2-256-128", "dh_group": null, "pfs": false}
+      }
+    },
+    {
+      "id": "capture_012",
+      "name": "ikev2-transport-ah-sha256",
+      "ike_version": 2, "mode": "transport", "ip_version": "IPv4", "encap": false, "traffic": "Web",
+      "ike_proposal": "aes256gcm16-prfsha256-modp2048",
+      "ah_proposal": "sha256",
+      "mode_observable": true,
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "NONE (AH)", "integrity": "HMAC-SHA2-256-128", "dh_group": null, "pfs": false}
+      }
+    },
+    {
+      "id": "capture_013",
+      "name": "ikev2-tunnel-with-normal-traffic",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "VoIP",
+      "ike_proposal": "aes256gcm16-prfsha256-modp2048",
+      "esp_proposal": "aes256gcm16-modp2048",
+      "capture_all": true,
+      "plain_traffic": {"kind": "Web", "seconds": 8},
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "dh_group": "DH14 (MODP-2048)", "pfs": true}
+      }
+    },
+    {
+      "id": "capture_014",
+      "name": "normal-traffic-no-ipsec",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "Web",
+      "ike_proposal": "aes256gcm16-prfsha256-modp2048",
+      "esp_proposal": "aes256gcm16",
+      "no_ipsec": true,
+      "capture_all": true,
+      "truth": {"ike_sa": {}, "child_sa": {}}
+    },
+    {
+      "id": "capture_015",
+      "name": "ikev2-rekey-pfs-modp2048",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "VoIP",
+      "ike_proposal": "aes256gcm16-prfsha256-modp2048",
+      "esp_proposal": "aes256gcm16-modp2048",
+      "child_rekey_seconds": 20, "ike_rekey_seconds": 45, "seconds": 70,
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "dh_group": "DH14 (MODP-2048)", "pfs": true}
+      }
+    },
+    {
+      "id": "capture_016",
+      "name": "ikev2-rekey-no-pfs",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "VoIP",
+      "ike_proposal": "aes256gcm16-prfsha256-modp2048",
+      "esp_proposal": "aes256gcm16",
+      "child_rekey_seconds": 20, "ike_rekey_seconds": 45, "seconds": 70,
+      "truth": {
+        "ike_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH14 (MODP-2048)"},
+        "child_sa": {"encryption": "AES-256-GCM-16", "integrity": "AEAD", "dh_group": null, "pfs": false}
+      }
+    },
+    {
+      "id": "capture_017",
+      "name": "ikev2-rekey-pfs-ecp256",
+      "ike_version": 2, "mode": "tunnel", "ip_version": "IPv4", "encap": false, "traffic": "VoIP",
+      "ike_proposal": "aes128gcm16-prfsha256-ecp256",
+      "esp_proposal": "aes128gcm16-ecp256",
+      "child_rekey_seconds": 20, "ike_rekey_seconds": 45, "seconds": 70,
+      "truth": {
+        "ike_sa": {"encryption": "AES-128-GCM-16", "integrity": "AEAD", "prf": "HMAC-SHA2-256", "dh_group": "DH19 (ECP-256)"},
+        "child_sa": {"encryption": "AES-128-GCM-16", "integrity": "AEAD", "dh_group": "DH19 (ECP-256)", "pfs": true}
+      }
+    }
+  ]
+}
