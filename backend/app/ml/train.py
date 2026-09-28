@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,6 +41,8 @@ SESSIONS_DIR = DATA_DIR / "raw" / "traffic_sessions"
 ISCX_CSV = DATA_DIR / "processed" / "iscx_features.csv"
 MODELS_DIR = DATA_DIR / "models"
 SEED = 26160
+CV_REPEATS = 5  # different random group splits averaged for the reported accuracy
+EXTERNAL_TEST_ORIGINS = {"real_app_phone_ikev2"}  # real recordings used only to test the traffic classifier
 
 
 def _candidates() -> dict:
@@ -66,24 +69,48 @@ def evaluate(model, encoder: LabelEncoder, frame: pd.DataFrame, features: list[s
     return scores(frame, encoder.inverse_transform(model.predict(frame[features])))
 
 
-def group_folds(frame: pd.DataFrame, folds: int = 5) -> list[tuple[np.ndarray, np.ndarray]]:
-    """The (train, test) row positions of the group cross-validation; also exported with the dataset package."""
-    splitter = StratifiedGroupKFold(n_splits=min(folds, frame[GROUP].nunique()), shuffle=True, random_state=SEED)
+def group_folds(frame: pd.DataFrame, folds: int = 5, seed: int = SEED) -> list[tuple[np.ndarray, np.ndarray]]:
+    """The (train, test) row positions of the group cross-validation; the SEED split is exported with the dataset package."""
+    splitter = StratifiedGroupKFold(n_splits=min(folds, frame[GROUP].nunique()), shuffle=True, random_state=seed)
     return list(splitter.split(frame, frame[LABEL], frame[GROUP]))
 
 
-def cross_validate(frame: pd.DataFrame, features: list[str], build, encoder: LabelEncoder, folds: int = 5) -> dict:
-    """Out-of-fold predictions where whole groups (captures/configurations) are held out, stratified by class."""
-    splits = group_folds(frame, folds)
-    folds = len(splits)
+def out_of_fold(frame: pd.DataFrame, fit_predict, folds: int = 5, seed: int = SEED) -> pd.Series:
+    """Predictions for every row from a model that never saw the row's group."""
     predicted = pd.Series(index=frame.index, dtype=object)
-    for train_index, test_index in splits:
-        model = fit(build(), frame.iloc[train_index], features, encoder)
-        predicted.iloc[test_index] = encoder.inverse_transform(model.predict(frame.iloc[test_index][features]))
+    for train_index, test_index in group_folds(frame, folds, seed):
+        predicted.iloc[test_index] = fit_predict(frame.iloc[train_index], frame.iloc[test_index])
+    return predicted
+
+
+def spread(values: list[float]) -> dict:
+    return {"mean": round(statistics.mean(values), 4), "sd": round(statistics.stdev(values), 4) if len(values) > 1 else 0.0,
+            "min": round(min(values), 4), "max": round(max(values), 4), "splits": len(values)}
+
+
+def cross_validate(frame: pd.DataFrame, features: list[str], build, encoder: LabelEncoder, folds: int = 5,
+                   repeats: int = CV_REPEATS) -> dict:
+    """Group cross-validation repeated over `repeats` different random splits.
+
+    With only a few recordings per class (e.g. two e-mail captures), which recordings land in the same test fold
+    moves accuracy by several points, so the headline figure is the mean over splits, reported with its spread.
+    Detailed per-class metrics and the confusion matrix come from the first (SEED) split."""
+    def fit_predict(train_part: pd.DataFrame, test_part: pd.DataFrame):
+        return encoder.inverse_transform(fit(build(), train_part, features, encoder).predict(test_part[features]))
+
+    runs = [out_of_fold(frame, fit_predict, folds, SEED + offset) for offset in range(repeats)]
+    correct = [run == frame[LABEL] for run in runs]
+    first = runs[0]
     return {
-        "folds": folds,
-        "overall": scores(frame, predicted.to_numpy()),
-        "by_source": {origin: scores(part, predicted.loc[part.index].to_numpy()) for origin, part in frame.groupby("dataset_origin")},
+        "folds": min(folds, frame[GROUP].nunique()),
+        "overall": scores(frame, first.to_numpy()),
+        "by_source": {origin: scores(part, first.loc[part.index].to_numpy()) for origin, part in frame.groupby("dataset_origin")},
+        "repeated": {
+            "accuracy": spread([float(c.mean()) for c in correct]),
+            "macro_f1": spread([scores(frame, run.to_numpy())["macro_f1"] for run in runs]),
+            "by_source": {origin: spread([float(c.loc[part.index].mean()) for c in correct])
+                          for origin, part in frame.groupby("dataset_origin")},
+        },
     }
 
 
@@ -170,16 +197,39 @@ def load_frame(source: str) -> tuple[pd.DataFrame, list[str]]:
     return frame, features
 
 
+def external_test(model, encoder: LabelEncoder, frame: pd.DataFrame, features: list[str]) -> dict:
+    """Accuracy on recordings kept out of training: per window, and per recording by majority vote of its windows."""
+    if frame.empty:
+        return {}
+    predicted = pd.Series(encoder.inverse_transform(model.predict(frame[features])), index=frame.index)
+    recordings = []
+    for group, part in frame.groupby(GROUP):
+        vote = predicted.loc[part.index].value_counts().idxmax()
+        recordings.append({"recording": group, "truth": part[LABEL].iloc[0], "predicted": vote,
+                           "windows": int(len(part)), "windows_correct": int((predicted.loc[part.index] == part[LABEL]).sum())})
+    return {"windows": scores(frame, predicted.to_numpy()),
+            "recordings": recordings,
+            "recording_accuracy": float(sum(r["truth"] == r["predicted"] for r in recordings) / len(recordings))}
+
+
 def train(source: str) -> dict:
     source = resolve_source(source)
     frame, features = load_frame(source)
+    # Real phone recordings are an independent test set, not training data: their class semantics differ from the
+    # ISCX training data (a WhatsApp video call is two-way and steady, ISCX "Video" is one-way streaming), and adding
+    # them lowered real-app accuracy from 79.1% to 74.1-74.4% (mean over 8 group splits). Kept out, they measure how
+    # the model does on real traffic it has never seen.
+    validation = frame.attrs["validation"]
+    held_out = frame[frame["dataset_origin"].isin(EXTERNAL_TEST_ORIGINS)]
+    frame = frame[~frame["dataset_origin"].isin(EXTERNAL_TEST_ORIGINS)].reset_index(drop=True)
+    frame.attrs["validation"] = validation
     origin = "+".join(sorted(set(frame["dataset_origin"])))
 
     splits = split_per_source(frame)
     encoder = LabelEncoder().fit(list(TRAFFIC_CLASSES))
     results = {}
     for name, build in _candidates().items():
-        print(f"Training {name}: 5-fold group cross-validation, then the hold-out split...", flush=True)
+        print(f"Training {name}: 5-fold group cross-validation over {CV_REPEATS} splits, then the hold-out split...", flush=True)
         model = fit(build(), splits["train"], features, encoder)
         results[name] = {
             "model": model,
@@ -190,8 +240,9 @@ def train(source: str) -> dict:
             "test_by_source": {origin: evaluate(model, encoder, part, features)
                                for origin, part in splits["test"].groupby("dataset_origin")},
         }
-    # Cross-validation holds out every group once, so it is a steadier basis for choosing than one validation split.
-    best = max(results, key=lambda name: results[name]["cross_validation"]["overall"].get("macro_f1", 0.0))
+    # Repeated cross-validation holds out every group once per split, so it is a steadier basis for choosing
+    # than one validation split (or one cross-validation split).
+    best = max(results, key=lambda name: results[name]["cross_validation"]["repeated"]["macro_f1"]["mean"])
     results[best]["random_split_accuracy"] = random_split_accuracy(frame, features, _candidates()[best], encoder)
     importances = dict(sorted(zip(features, map(float, getattr(results[best]["model"], "feature_importances_", np.zeros(len(features))))),
                               key=lambda item: -item[1])[:10])
@@ -207,22 +258,25 @@ def train(source: str) -> dict:
         "split_method": "group-level (configuration/session/capture group), 70/15/15 within each data source, no group shared between splits",
         "features": features,
         "selected_model": best,
-        "selection_criterion": "5-fold group cross-validation macro-F1",
+        "selection_criterion": f"5-fold group cross-validation macro-F1, mean over {CV_REPEATS} splits",
         "models": {name: {"cross_validation": r["cross_validation"], "validation": r["validation"], "test": r["test"],
                           "test_by_source": r["test_by_source"], "random_split_accuracy": r.get("random_split_accuracy")}
                    for name, r in results.items()},
         "top_feature_importances": importances,
+        # Real recordings never used for training (e.g. WhatsApp and Gmail through a phone's IKEv2 VPN).
+        "external_test": external_test(results[best]["model"], encoder, held_out, features),
     }
-    suffix = {"synthetic": "synthetic", "sessions": "testbed", "iscx": "iscx", "combined": "combined"}[source]
+    suffix ={"synthetic": "synthetic", "sessions": "testbed", "iscx": "iscx", "combined": "combined"}[source]
     version = f"{suffix}-{trained_at[:19].replace(':', '').replace('-', '')}"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     artifact = {
         "model": results[best]["model"], "encoder": encoder, "model_name": best, "features": features,
         "version": version, "training_source": origin, "trained_at": trained_at,
         "test_metrics": {k: results[best]["test"].get(k) for k in ("accuracy", "macro_f1", "samples")},
-        # Cross-validated accuracy (every group held out once): the figure used for the AI confidence score.
-        "cv_accuracy": results[best]["cross_validation"]["overall"].get("accuracy"),
-        "cv_accuracy_by_source": {o: r.get("accuracy") for o, r in results[best]["cross_validation"]["by_source"].items()},
+        # Cross-validated accuracy, mean over several group splits: the figure used for the AI confidence score.
+        "cv_accuracy": results[best]["cross_validation"]["repeated"]["accuracy"]["mean"],
+        "cv_accuracy_sd": results[best]["cross_validation"]["repeated"]["accuracy"]["sd"],
+        "cv_accuracy_by_source": {o: r["mean"] for o, r in results[best]["cross_validation"]["repeated"]["by_source"].items()},
     }
     # Every model is archived under versions/ so a retrain never loses an earlier model.
     archive = MODELS_DIR / "versions" / version
@@ -247,15 +301,31 @@ def markdown_report(metrics: dict) -> str:
         lines.append(f"| {name}{' (selected)' if name == metrics['selected_model'] else ''} | {v.get('accuracy', 0):.3f} | {v.get('macro_f1', 0):.3f} | {t.get('accuracy', 0):.3f} | {t.get('macro_f1', 0):.3f} |")
     cv = metrics["models"][metrics["selected_model"]].get("cross_validation")
     if cv:
-        lines += ["", f"{cv['folds']}-fold group cross-validation of the selected model (every capture/configuration held out once):", "",
-                  "| Source | Rows | Accuracy | Macro-F1 |", "|---|---|---|---|",
-                  *(f"| {o} | {r['samples']} | {r['accuracy']:.3f} | {r['macro_f1']:.3f} |" for o, r in cv["by_source"].items()),
-                  f"| **all** | {cv['overall']['samples']} | {cv['overall']['accuracy']:.3f} | {cv['overall']['macro_f1']:.3f} |",
-                  "", "Per-class recall (cross-validation): " + ", ".join(f"{k} {v['recall']:.2f}" for k, v in cv["overall"]["per_class"].items())]
+        repeated = cv["repeated"]
+        n = repeated["accuracy"]["splits"]
+        cell = lambda s: f"**{s['mean']:.1%}** ± {s['sd']:.1%} ({s['min']:.1%}–{s['max']:.1%})"
+        lines += ["", f"{cv['folds']}-fold group cross-validation of the selected model, repeated over {n} different random "
+                      "group splits (every capture/configuration is held out once per split). Accuracy is the mean ± standard "
+                      "deviation over splits, with the worst and best split:", "",
+                  "| Source | Rows | Accuracy |", "|---|---|---|",
+                  *(f"| {o} | {cv['by_source'][o]['samples']} | {cell(s)} |" for o, s in repeated["by_source"].items()),
+                  f"| **all** | {cv['overall']['samples']} | {cell(repeated['accuracy'])} |",
+                  "", f"Macro-F1 (all sources): {repeated['macro_f1']['mean']:.3f} ± {repeated['macro_f1']['sd']:.3f}.",
+                  "", "With few recordings per class (e.g. two e-mail captures), the split alone moves accuracy by several "
+                      "points, so the mean is the figure to quote, not any single split.",
+                  "", "Per-class recall (first split): " + ", ".join(f"{k} {v['recall']:.2f}" for k, v in cv["overall"]["per_class"].items())]
         matrix = cv["overall"]["confusion_matrix"]
-        lines += ["", "Cross-validation confusion matrix (rows = truth, columns = predicted):", "",
+        lines += ["", "Cross-validation confusion matrix, first split (rows = truth, columns = predicted):", "",
                   "| | " + " | ".join(matrix["labels"]) + " |", "|---" * (len(matrix["labels"]) + 1) + "|",
                   *(f"| {label} | " + " | ".join(map(str, row)) + " |" for label, row in zip(matrix["labels"], matrix["matrix"]))]
+    external = metrics.get("external_test") or {}
+    if external:
+        lines += ["", "Independent real-world test (real apps recorded through a phone's IKEv2 VPN, never used for training): "
+                      f"{external['recording_accuracy']:.0%} of recordings by majority vote of their 15 s windows, "
+                      f"{external['windows']['accuracy']:.0%} of individual windows.", "",
+                  "| Recording | Truth | Predicted (vote) | Windows correct |", "|---|---|---|---|",
+                  *(f"| {r['recording']} | {r['truth']} | {r['predicted']} | {r['windows_correct']}/{r['windows']} |"
+                    for r in external["recordings"])]
     by_source = metrics["models"][metrics["selected_model"]].get("test_by_source", {})
     if len(by_source) > 1:
         lines += ["", "Held-out test accuracy of the selected model by data source:", "",
@@ -282,13 +352,24 @@ def main() -> None:
     selected = metrics["models"][metrics["selected_model"]]
     print(f"\nSource: {metrics['training_source']}  selected: {metrics['selected_model']}")
     for name, result in metrics["models"].items():
-        cv = result["cross_validation"]["overall"]
-        print(f"  {name:12} CV acc {cv['accuracy']:.3f}  CV macro-F1 {cv['macro_f1']:.3f}   hold-out test acc {result['test'].get('accuracy', 0):.3f}")
-    print("Selected model, cross-validation by source:")
+        repeated = result["cross_validation"]["repeated"]
+        print(f"  {name:12} CV acc {repeated['accuracy']['mean']:.3f} ± {repeated['accuracy']['sd']:.3f}  "
+              f"CV macro-F1 {repeated['macro_f1']['mean']:.3f} ± {repeated['macro_f1']['sd']:.3f}   "
+              f"hold-out test acc {result['test'].get('accuracy', 0):.3f}")
+    print(f"Selected model, cross-validation by source (mean ± sd over {CV_REPEATS} group splits; recall from the first split):")
     for origin, result in selected["cross_validation"]["by_source"].items():
+        s = selected["cross_validation"]["repeated"]["by_source"][origin]
         recall = ", ".join(f"{k} {v['recall']:.2f}" for k, v in result["per_class"].items() if v["support"])
-        print(f"  {origin}: accuracy {result['accuracy']:.3f} on {result['samples']} rows  (recall: {recall})")
+        print(f"  {origin}: accuracy {s['mean']:.3f} ± {s['sd']:.3f} (range {s['min']:.3f}-{s['max']:.3f}) "
+              f"on {result['samples']} rows  (recall: {recall})")
     print(f"Hold-out test accuracy {selected['test'].get('accuracy', 0):.3f} on {selected['test'].get('samples')} rows. Full report in data/models/.")
+    external = metrics.get("external_test") or {}
+    if external:
+        print(f"Independent real-world test (never trained on): {external['recording_accuracy']:.0%} of "
+              f"{len(external['recordings'])} recordings by window vote, {external['windows']['accuracy']:.0%} of windows")
+        for r in external["recordings"]:
+            print(f"   {'OK  ' if r['truth'] == r['predicted'] else 'MISS'} {r['recording']}: {r['truth']} -> {r['predicted']} "
+                  f"({r['windows_correct']}/{r['windows']} windows)")
     leaky = selected.get("random_split_accuracy") or {}
     if leaky:
         print("For comparison only, random window-level split (leaky, how many papers report): "

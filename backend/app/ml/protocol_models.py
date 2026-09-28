@@ -175,30 +175,35 @@ def load_training_frame() -> pd.DataFrame:
 def train(out_dir: Path | None = None) -> dict:
     import joblib
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.model_selection import StratifiedGroupKFold
 
     from app.ml.preprocessing import GROUP, LABEL
-    from app.ml.train import scores
+    from app.ml.train import CV_REPEATS, out_of_fold, scores, spread
 
     out_dir = out_dir or settings.model_dir
     frame = load_training_frame()
     data = frame.dropna(subset=["mode"]).assign(**{LABEL: lambda d: d["mode"]})
     build = lambda: RandomForestClassifier(n_estimators=400, min_samples_leaf=2, class_weight="balanced", random_state=SEED, n_jobs=-1)
     folds = min(5, data[GROUP].nunique())
-    predicted = pd.Series(index=data.index, dtype=object)
-    for train_index, test_index in StratifiedGroupKFold(n_splits=folds, shuffle=True, random_state=SEED).split(data, data[LABEL], data[GROUP]):
-        model = build().fit(data.iloc[train_index][MODE_FEATURES], data.iloc[train_index][LABEL])
-        predicted.iloc[test_index] = model.predict(data.iloc[test_index][MODE_FEATURES])
-    # Measure the deployed behaviour: the physical rule decides first, the model handles the rest.
+    fit_predict = lambda train_part, test_part: build().fit(train_part[MODE_FEATURES], train_part[LABEL]).predict(test_part[MODE_FEATURES])
+    # Measure the deployed behaviour: the physical rule decides first, the model handles the rest. Repeated over
+    # several group splits, because which VPN profiles are held out together moves accuracy by several points.
     by_rule = data.apply(lambda row: physically_transport(row.to_dict()), axis=1)
-    predicted[by_rule] = "Transport"
-    mode_cv = scores(data, predicted.to_numpy(), MODES)
+    runs = []
+    for offset in range(CV_REPEATS):
+        predicted = out_of_fold(data, fit_predict, folds, SEED + offset)
+        predicted[by_rule] = "Transport"
+        runs.append(predicted)
+    mode_cv = scores(data, runs[0].to_numpy(), MODES)
+    mode_cv["repeated"] = {"accuracy": spread([float((run == data[LABEL]).mean()) for run in runs]),
+                           "by_source": {origin: spread([float((run.loc[part.index] == part[LABEL]).mean()) for run in runs])
+                                         for origin, part in data.groupby("dataset_origin")}}
     mode_cv["decided_by_physical_rule"] = int(by_rule.sum())
     mode_model = build().fit(data[MODE_FEATURES], data[LABEL])
 
     trained_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     artifact = {"version": f"protocol-{trained_at[:19].replace(':', '').replace('-', '')}", "trained_at": trained_at,
-                "mode_model": mode_model, "mode_features": MODE_FEATURES, "mode_cv_accuracy": round(mode_cv["accuracy"], 4)}
+                "mode_model": mode_model, "mode_features": MODE_FEATURES,
+                "mode_cv_accuracy": mode_cv["repeated"]["accuracy"]["mean"], "mode_cv_accuracy_sd": mode_cv["repeated"]["accuracy"]["sd"]}
     metrics = {
         "trained_at": trained_at,
         "mode": {"rows": int(len(data)), "profiles": int(data[GROUP].nunique()), "folds": folds, "cross_validation": mode_cv,
@@ -233,9 +238,13 @@ def main() -> None:
     metrics = train()
     mode = metrics["mode"]
     cv = mode["cross_validation"]
-    print(f"Mode: {mode['rows']} sessions from {mode['profiles']} VPN profiles; {mode['folds']}-fold group CV accuracy {cv['accuracy']:.3f} "
-          f"(recall " + ", ".join(f"{k} {v['recall']:.2f}" for k, v in cv["per_class"].items()) + f"); "
+    repeated = cv["repeated"]["accuracy"]
+    print(f"Mode: {mode['rows']} sessions from {mode['profiles']} VPN profiles; {mode['folds']}-fold group CV accuracy "
+          f"{repeated['mean']:.3f} ± {repeated['sd']:.3f} over {repeated['splits']} splits (range {repeated['min']:.3f}-{repeated['max']:.3f}; "
+          f"first-split recall " + ", ".join(f"{k} {v['recall']:.2f}" for k, v in cv["per_class"].items()) + f"); "
           f"{cv['decided_by_physical_rule']} decided by the physical bound")
+    for origin, s in cv["repeated"]["by_source"].items():
+        print(f"   {origin}: {s['mean']:.3f} ± {s['sd']:.3f}")
     cipher = metrics["esp_cipher"]
     print(f"ESP cipher (Bayesian, no training): accuracy {cipher['accuracy_when_decided']:.3f} on {cipher['decided']} sessions; "
           f"decided for {cipher['coverage']:.0%} (the rest have too few distinct lengths)")
