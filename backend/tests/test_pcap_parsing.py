@@ -174,3 +174,13 @@ def test_truncated_capture_returns_readable_packets_with_warning(tmp_path: Path)
 
     assert result["packet_count"] == 2
     assert result["warnings"]
+
+
+def test_ah_decoded_inside_esp_is_ignored() -> None:
+    """Real phone capture: the ESP-NULL heuristic decoded encrypted bytes as `esp:ah:ax25`."""
+    columns = [("frame_number", "frame.number"), ("protocols", "frame.protocols"), ("esp_spi", "esp.spi"),
+               ("ah_spi", "ah.spi"), ("ah_sequence", "ah.sequence")]
+    noise = TSharkService._record("4798\teth:ethertype:ip:udp:udpencap:esp:ah:ax25\t0xc1a339a4\t0x3130f73a\t7", columns)
+    assert noise.esp_spi == "0xc1a339a4" and noise.ah_spi is None and noise.ah_sequence is None
+    real_ah = TSharkService._record("12\teth:ethertype:ip:ah:icmp\t\t0xc2000001\t5", columns)
+    assert real_ah.ah_spi == "0xc2000001" and real_ah.ah_sequence == 5

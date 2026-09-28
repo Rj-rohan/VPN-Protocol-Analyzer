@@ -257,11 +257,16 @@ class TSharkService:
         frame_number = _int(values.get("frame_number"))
         if frame_number is None:
             return None
+        protocols = [p for p in (values.get("protocols") or "").split(":") if p]
+        # The ESP-NULL heuristic occasionally decodes encrypted payload bytes as an AH header
+        # (seen as "esp:ah:ax25" in a real phone capture). Real AH is never nested inside ESP,
+        # so an AH layer after ESP is decoding noise, not AH traffic.
+        nested_ah = "esp" in protocols and "ah" in protocols and protocols.index("ah") > protocols.index("esp")
         return PacketRecord(
             frame_number=frame_number,
             timestamp=_float(values.get("timestamp")),
             length=_int(values.get("length")) or 0,
-            protocols=[p for p in (values.get("protocols") or "").split(":") if p],
+            protocols=protocols,
             ip_len=_int(values.get("ip_len")),
             ip_hdr_len=_int(values.get("ip_hdr_len")),
             ipv6_plen=_int(values.get("ipv6_plen")),
@@ -275,6 +280,6 @@ class TSharkService:
             esp_spi=values.get("esp_spi") or None,
             esp_sequence=_int(values.get("esp_sequence")),
             esp_next_header=_int(values.get("esp_next_header")),
-            ah_spi=values.get("ah_spi") or None,
-            ah_sequence=_int(values.get("ah_sequence")),
+            ah_spi=None if nested_ah else values.get("ah_spi") or None,
+            ah_sequence=None if nested_ah else _int(values.get("ah_sequence")),
         )
