@@ -58,7 +58,7 @@ Windows of one recording resemble each other, so **all splits are by group**:
 - **`split`**: 70/15/15 train/validation/test over groups, done separately inside each source (seed 26160). A source with fewer than 3 groups goes entirely to train.
 - **`cv_fold`**: 5-fold `StratifiedGroupKFold` (shuffle, seed 26160) over all rows. The row is in the test fold `cv_fold`.
 
-These are the exact assignments `app.ml.train` uses; the package is built by calling the same functions. Report **group-level** results. A random row split overstates accuracy (93.1% vs 83.2% on ISCX).
+These are the exact assignments `app.ml.train` uses; the package is built by calling the same functions. Report **group-level** results. A random row split overstates accuracy (93.1% vs about 79–81% on ISCX).
 
 ## Privacy and licensing
 

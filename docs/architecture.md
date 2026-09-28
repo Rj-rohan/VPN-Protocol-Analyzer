@@ -152,7 +152,7 @@ erDiagram
 | Two TShark passes instead of one JSON pass | JSON for every ESP packet is 50–100× larger. Pass 1 stays compact and pass 2 covers only IKE |
 | `--no-duplicate-keys` on the JSON pass | TShark repeats keys for repeated fields, and JSON parsers keep only the last one, which silently loses proposals |
 | Field map validated against `tshark -G fields` | Field names differ between Wireshark versions; `/health` reports any that are missing instead of the parser returning silent blanks |
-| Group-level splits and cross-validation | Windows from one recording look alike, so a random split inflates accuracy (93.1% vs 83.2% on ISCX) |
+| Group-level splits and cross-validation | Windows from one recording look alike, so a random split inflates accuracy (93.1% vs about 79–81% on ISCX); even group splits vary by several points with few recordings per class, so cross-validation is repeated over 5 splits and reported as mean ± spread |
 | Bayesian cipher inference instead of a classifier | A classifier cannot recognise a cipher it never saw; the length lattice follows from RFC 4303 framing and needs no training |
 | LLM only writes prose from a fact sheet, and a grounding check rejects any value not in the facts | Reports must never contain an invented algorithm or number |
 | In-process worker behind an `AnalysisQueue` interface | Simple to deploy for the hackathon; the interface is where Celery/RQ would plug in |

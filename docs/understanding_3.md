@@ -43,12 +43,12 @@ Using AI to "guess" something that is written in cleartext would only add errors
 |---|---|---|---|---|
 | **IPsec protocol** | Is there IPsec, and is it ESP (encrypted) or AH (integrity only)? | `backend/app/packet/features.py` (detection), `esp.py` | IKE headers (UDP 500/4500), ESP (IP protocol 50 or UDP-encapsulated), AH (protocol 51), consistent sequence numbers. Combined into a **detection confidence** with the evidence listed | **100%** (17/17, including the no-IPsec capture) |
 | **IKE version** | IKEv1 (old) or IKEv2 (current) | `backend/app/packet/ike.py` | Version field in the ISAKMP header | **100%** |
-| **Tunnel mode / transport mode** | Whether the whole packet or only its data is protected (see [understanding_1.md §1](understanding_1.md#1-tunnel-mode-vs-transport-mode)) | `esp.py`, `esp_structure.py`, `ml/protocol_models.py` | 1) **Read directly** for AH and ESP-NULL. 2) **Physical rule:** an inner packet under 28 bytes means transport. 3) **AI (RandomForest)** on inner packet sizes | Observed: **100%** when reported. AI: **97.0%** cross-validated; 13/14 on the testbed |
-| **Encryption algorithm** | Which cipher protects the data (AES-GCM, AES-CBC, 3DES…) | `ike.py`, `iana.py`, `esp_structure.py` | IKE SA cipher and key length **read** from IKE_SA_INIT. ESP cipher *family* **inferred by AI**, a Bayesian test on the pattern of packet lengths (no training needed) | IKE: **100%**. ESP family: **100%** of 227 sessions where it decided |
+| **Tunnel mode / transport mode** | Whether the whole packet or only its data is protected (see [understanding_1.md §1](understanding_1.md#1-tunnel-mode-vs-transport-mode)) | `esp.py`, `esp_structure.py`, `ml/protocol_models.py` | 1) **Read directly** for AH and ESP-NULL. 2) **Physical rule:** an inner packet under 28 bytes means transport. 3) **AI (RandomForest)** on inner packet sizes | Observed: **100%** when reported. AI: **92.9% ± 2.6%** cross-validated; 13/14 on the testbed; 98.4% on real phone VPN traffic |
+| **Encryption algorithm** | Which cipher protects the data (AES-GCM, AES-CBC, 3DES…) | `ike.py`, `iana.py`, `esp_structure.py` | IKE SA cipher and key length **read** from IKE_SA_INIT. ESP cipher *family* **inferred by AI**, a Bayesian test on the pattern of packet lengths (no training needed) | IKE: **100%**. ESP family: **100%** of 291 samples where it decided (including real WhatsApp and Gmail) |
 | **Authentication algorithm** | 1) Integrity algorithm (HMAC-SHA-256…), which proves data wasn't changed; 2) authentication method (pre-shared key vs certificate), which proves who you are | `ike.py` | Integrity and PRF **read** from IKE. Authentication method **read** for IKEv1; for IKEv2 it travels inside the encrypted IKE_AUTH, so it is reported as **not observable** | Integrity: **100%**. Method: IKEv1 only, by protocol design |
 | **Key exchange method** | How the two sides agree on keys: IKE version + **Diffie-Hellman group** (+ PFS on rekeys) | `ike.py`, `rekey.py` | DH group **read** from IKE. PFS **inferred** from rekey message size | DH group: **100%**. PFS: **3/3** rekeying captures |
 | **Security Association characteristics** | The properties of each agreed SA: its ID (SPI), lifetime, NAT traversal, sequence behaviour, proposals | `features.py`, `rekey.py`, `esp.py` | SPIs **read**. NAT-T **read** (UDP-encapsulated ESP). Lifetime: **read** in IKEv1, **inferred** from rekey intervals in IKEv2. Replay indicators (duplicates, reordering). Offered vs selected proposals | NAT-T **100%**; rekey interval **3/3** |
-| **Type of traffic inside ESP** | What the encrypted tunnel carries: Web, Video, VoIP, Email, Chat, ICMP, File-Transfer | `ml/train.py`, `ml/predict.py`, `packet/traffic.py` | **AI (RandomForest)** on 59 statistics of packet sizes, timing, direction, bursts and idle gaps. Trained on 1,490 labelled examples (real apps + lab) | **83.2%** on real apps (strict: every capture held out once); **87.4%** overall; **100%** (16/16) on the testbed |
+| **Type of traffic inside ESP** | What the encrypted tunnel carries: Web, Video, VoIP, Email, Chat, ICMP, File-Transfer | `ml/train.py`, `ml/predict.py`, `packet/traffic.py` | **AI (RandomForest)** on 59 statistics of packet sizes, timing, direction, bursts and idle gaps. Trained on 1,490 labelled examples (real apps + lab); tested separately on real phone WhatsApp/Gmail | **81.3% ± 2.1%** on real apps (strict: every capture held out, mean over 5 splits); **86.0%** overall; **100%** (16/16) on the testbed; **5 of 9** real WhatsApp/Gmail phone recordings it never trained on |
 
 **Where you see it in the app:** Analysis → **Protocol details** tab (every value with its source badge and evidence, plus the **AI protocol inference** panel) and the **Traffic analysis** tab.
 
@@ -100,7 +100,7 @@ Code: `backend/app/reports/` (`executive.py`, `technical.py`, `narrative.py`, `l
 | Deliverable | Status | What it is |
 |---|---|---|
 | **Working software prototype** | ✅ | FastAPI backend + Next.js dashboard + PostgreSQL. Runs locally on Windows or with Docker Compose. Login with roles (admin, analyst, viewer), background analysis, audit log. **141 automated tests** pass |
-| **AI classification engine** | ✅ | 3 components: **traffic classifier** (RandomForest, 83.2% real apps), **mode classifier** (rule + RandomForest, 97.0%), **ESP cipher inference** (Bayesian, 100% when decided). Models are versioned in `data/models/versions/`, and every prediction states its model and accuracy |
+| **AI classification engine** | ✅ | 3 components: **traffic classifier** (RandomForest, about 79–81% real apps), **mode classifier** (rule + RandomForest, 92.9%), **ESP cipher inference** (Bayesian, 100% when decided). Models are versioned in `data/models/versions/`, and every prediction states its model and accuracy |
 | **Interactive dashboard** | ✅ | Pages: Dashboard (charts, recent analyses, compliance overview), Upload, Analyses list, analysis detail (6 tabs), **Live capture**, Users & audit |
 | **Security assessment report** | ✅ | Executive and technical PDFs, generated on demand for any analysis |
 | **Demonstration video** | ❌ **Pending** | A scene-by-scene script is to be written, then recorded by the team |
@@ -114,12 +114,12 @@ Code: `backend/app/reports/` (`executive.py`, `technical.py`, `narrative.py`, `l
 | What | Result |
 |---|---|
 | IPsec protocol, IKE version, IP version, cipher, integrity, DH group, NAT-T | **100%** on 17 labelled captures |
-| Tunnel/transport (AI) | **97.0%** |
+| Tunnel/transport (AI) | **92.9% ± 2.6%** (98.4% on real phone VPN traffic) |
 | ESP cipher family (AI) | **100%** when decided |
 | PFS and key lifetime from rekeys | **3/3** |
-| Traffic type (AI) | **83.2%** on real applications (strict evaluation); 100% on the testbed |
+| Traffic type (AI) | **81.3% ± 2.1%** on real applications (strict evaluation, mean over 5 splits); 100% on the testbed; 5 of 9 real phone WhatsApp/Gmail recordings never trained on |
 | Security rules | **No false alarms** on any rule across 17 captures |
 
 **One line:**
 
-> *"Our engine reads every value the cleartext exposes with 100% accuracy, uses AI only for what encryption hides (mode 97%, cipher 100% when decided, traffic type 83% on real apps), labels every value as observed, inferred or predicted, and turns it all into a transparent score, compliance verdicts against NIST and CNSA, a threat matrix, an AI confidence score, and executive and technical reports."*
+> *"Our engine reads every value the cleartext exposes with 100% accuracy, uses AI only for what encryption hides (mode 93%, cipher 100% when decided, traffic type about 79–81% on real apps), labels every value as observed, inferred or predicted, and turns it all into a transparent score, compliance verdicts against NIST and CNSA, a threat matrix, an AI confidence score, and executive and technical reports."*

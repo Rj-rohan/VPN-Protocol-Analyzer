@@ -140,7 +140,7 @@ A plain recording tells you what happened. A recording **plus its answer key** l
 | Real applications (ISCX 2016, converted to ESP sizes) | 1,116 windows from 30 captures |
 | Special cases | NAT-T (ESP inside UDP 4500, capture_008), IPv6 (capture_007), **ESP-NULL**, i.e. no encryption (009, 010) |
 
-**Result.** SPIs and NAT-T 100% correct; mode AI 97%; cipher AI 100% when decided; traffic type 83.2% on real apps and 100% on the testbed.
+**Result.** SPIs and NAT-T 100% correct; mode AI about 93%; cipher AI 100% when decided; traffic type about 79–81% on real apps (mean over several splits), 5 of 9 on real phone WhatsApp/Gmail and 100% on the testbed.
 
 ### AH packets (optional)
 

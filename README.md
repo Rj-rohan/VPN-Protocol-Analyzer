@@ -155,13 +155,14 @@ cd backend
 ..\.venv\Scripts\python -m app.ml.train --source synthetic   :: supplied 2,000-row CSV (scaffolding)
 ```
 
-- **Leakage-safe evaluation.** 5-fold group cross-validation, in which every capture or VPN configuration is held out once. A 70/15/15 group-level hold-out is reported alongside it. No group ever appears on both sides.
-- **Model comparison.** RandomForest and XGBoost are both trained, and the better one on cross-validated macro-F1 is kept. Its metrics go to `data/models/traffic_classifier_<source>_report.md`, and every model is archived in `data/models/versions/`.
+- **Leakage-safe evaluation.** 5-fold group cross-validation, in which every capture or VPN configuration is held out once, **repeated over 5 different random splits**. Accuracy is reported as mean ± spread, because with few recordings per class a single split can be several points luckier or unluckier than the model really is. A 70/15/15 group-level hold-out is reported alongside. No group ever appears on both sides.
+- **Model comparison.** RandomForest and XGBoost are both trained, and the better one on mean cross-validated macro-F1 is kept. Its metrics go to `data/models/traffic_classifier_<source>_report.md`, and every model is archived in `data/models/versions/`.
 - **Model preference.** Prediction uses the combined model when it exists. Every prediction says which data trained its model and what its cross-validated accuracy was.
 - **Training data.** 1,490 rows in 49 groups:
   - 1,116 real-app windows from 30 ISCX VPN captures;
   - 357 lab sessions recorded without Docker by `testbed/scripts/netns_sessions.py` (kernel ESP between network namespaces, 17 profiles: GCM, CBC-SHA1/SHA256, 3DES, NULL, tunnel/transport, IPv4/IPv6, NAT-T);
   - 17 strongSwan sessions.
+- **Independent real-world test.** 9 recordings of **real WhatsApp and Gmail** on an Android phone's built-in IKEv2 client through our strongSwan server ([docs/whatsapp-live.md](docs/whatsapp-live.md)). They are never used to train the traffic classifier; every training run reports how it does on them.
 
 Results:
 
@@ -169,12 +170,12 @@ Results:
 |---|---|---|
 | Synthetic CSV model (XGBoost) | 98.7% (15 unseen config groups) | not measured; it scored **0%** on real strongSwan captures, because the synthetic statistics look nothing like real traffic (VoIP at 0.1 packets/s instead of about 100) |
 | Lab-session model | 100% (unseen VPN profiles) | 48.6% (never trained on real apps) |
-| **Combined model (RandomForest, active)** | 100% lab and strongSwan sessions (group CV) | **83.2%** (5-fold group CV over 30 captures, 1,116 windows) |
+| **Combined model (RandomForest, active)** | 100% lab, 98.8% strongSwan sessions (group CV) | **81.3% ± 2.1%** (range 78.4–83.6% over 5 splits; 30 captures, 1,116 windows) |
 
-- **Overall:** 87.4% cross-validated accuracy, macro-F1 0.884. The same model scores 93.1% on ISCX under a random window split, which is how many papers report it; that split leaks windows of one recording into both sides.
-- **Real-app recall per class:** Chat 97%, Video 87%, VoIP 83%, File-Transfer 72%, Email 26%.
+- **Fair real-app figure: about 79–81%.** Over 8 other splits of the same data, ISCX accuracy averaged 79.1% ± 3.5%. The same model scores 93.1% under a random window split, which is how many papers report it; that split leaks windows of one recording into both sides.
+- **Real modern phone apps: 5 of 9 whole captures right** (WhatsApp chat, voice call and video call, and 2 of 5 Gmail), with low confidence (21–45%). Today's mobile apps behave differently from the 2016 desktop apps the model learned from (domain shift). Adding the 9 recordings to training lowered ISCX accuracy to about 74%, because their classes don't match ISCX's (a WhatsApp video call is two-way, ISCX "Video" is streaming), so they serve as a test set until there are enough per class.
+- **Real-app recall per class** (first split): Chat 97%, Video 87%, VoIP 83%, File-Transfer 72%, Email 26%.
 - **Email is weak** because the ISCX VPN set has only two email captures, and email windows look like chat (sparse, small packets). `python -m app.ml.iscx --include-nonvpn` adds the non-VPN captures, including four more email captures.
-- **Earlier model:** the previous combined model scored 76.6% on real apps (Video 40%). Adding temporal-pattern features and 9 more lab profiles raised it to 83.2%.
 
 Details and per-class precision are in [docs/model-card.md](docs/model-card.md).
 
@@ -182,7 +183,7 @@ Details and per-class precision are in [docs/model-card.md](docs/model-card.md).
 
 The most important features are the share of 128–256-byte packets, downlink size variation, the largest burst, timing variation, burst count and the gap between bursts, so the model recognises traffic behaviour whatever the cipher, mode or IP version.
 
-**Caveat:** the lab scores come from the project's own traffic generators (`testbed/scripts/traffic.py`). The ISCX score (83.2%) is the real-application figure, but that dataset is from 2016 and was converted from OpenVPN. Accuracy on a particular organisation's traffic still has to be measured with labelled captures from that environment. Adding such captures and retraining is supported.
+**Caveat:** the lab scores come from the project's own traffic generators (`testbed/scripts/traffic.py`). The ISCX score (about 79–81%) is the real-application figure, but that dataset is from 2016 and was converted from OpenVPN. Accuracy on a particular organisation's traffic still has to be measured with labelled captures from that environment. Adding such captures and retraining is supported.
 
 ## Configuration compliance
 
@@ -212,10 +213,10 @@ Results appear in the analysis **Compliance** tab, on the dashboard and in both 
   - **When it abstains:** with fewer than 4 distinct lengths (constant-size VoIP, video or ping) it reports "undecided".
   - **Key length** (AES-128 vs AES-256) is never inferred, because both produce identical packet sizes.
 - **Tunnel vs transport mode: a physical rule, then a RandomForest.** Once the cipher overhead is removed, each packet's inner size is known. An inner packet under 28 bytes can't hold an IPv4 header plus a transport header, which proves transport mode. Otherwise a RandomForest decides from the inner-size distribution (tunnel mode adds a 20- or 40-byte inner header to every packet, which shows most clearly in TCP ACKs) plus traffic context. Rule META-001 also fires on a transport-mode prediction with confidence of 0.8 or higher, marked as predicted.
-- **Training data:** labelled lab sessions from 17 VPN profiles (`netns_sessions.py`: GCM, CBC-SHA1/SHA256, 3DES, NULL, tunnel/transport, IPv4/IPv6, NAT-T). ISCX windows are excluded because their ESP framing is synthetic.
-- **Results** (group CV by VPN profile, 370 sessions from 19 profiles):
-  - Mode is **97.0%** accurate (Tunnel recall 0.98, Transport 0.96).
-  - ESP cipher family is **100%** correct on all 227 sessions where it decided (61%), across AEAD, CBC-SHA1, CBC-SHA256, 3DES and NULL.
+- **Training data:** labelled lab sessions from 17 VPN profiles (`netns_sessions.py`: GCM, CBC-SHA1/SHA256, 3DES, NULL, tunnel/transport, IPv4/IPv6, NAT-T), plus the real WhatsApp phone recordings. ISCX windows are excluded because their ESP framing is synthetic.
+- **Results** (group CV by VPN profile, repeated over 5 splits, 374 sessions):
+  - Mode is **92.9% ± 2.6%** accurate (range 89–95%), and 98.4% on the real WhatsApp/Gmail phone recordings (their 15 s windows are part of the mode training data).
+  - ESP cipher family is **100%** correct on all 291 samples where it decided (67%), across AEAD, CBC-SHA1, CBC-SHA256, 3DES and NULL, including the real phone's AES-CBC + HMAC-SHA2-256.
 
 ## Live capture
 

@@ -92,7 +92,7 @@ The mode is decided inside the **encrypted** part of the IKE negotiation, and in
 | **2. Physical rule** | Encrypted ESP | We work out the cipher's overhead (from the packet-size pattern), subtract it, and get the size of the inner packet. **An inner packet smaller than 28 bytes cannot contain an IP header (20 bytes) plus a transport header (8 or more bytes)**, so it *must* be transport mode | `predicted`, 99% |
 | **3. AI model (RandomForest)** | Encrypted ESP, no tiny packets | Tunnel mode adds **20 extra bytes (IPv4) or 40 (IPv6) to every packet**. This shows most clearly in TCP acknowledgements, the smallest common packet: in transport mode they are about 20–32 bytes inside, in tunnel mode about 40–52. The model learned these size patterns from 370 labelled sessions | `predicted`, with confidence |
 
-**Accuracy:** 97.0% in cross-validation over 19 VPN configurations it never saw during training, and 13 of 14 correct on the separate strongSwan test captures.
+**Accuracy:** 92.9% ± 2.6% in cross-validation (VPN configurations it never saw during training, averaged over 5 splits), 13 of 14 correct on the separate strongSwan test captures, and 98.4% on real WhatsApp and Gmail phone traffic.
 
 **Real example from our testbed:**
 - **capture_003** (transport mode, AES-CBC): the smallest inner packet works out to about **22.5 bytes**, too small to hold an IP header, so the result is **Transport, 99%**. ✔ Correct.
@@ -153,7 +153,7 @@ AES can run in different **modes of operation**. The two in the requirement are:
 
 **How we detect it.**
 - **From IKE (observed):** read directly from the negotiation, 100%.
-- **From encrypted ESP (AI, no training needed):** each cipher pads packets differently, so the *set* of packet sizes gives it away. GCM packets fall on a 4-byte grid, while CBC packets all fall on a 16-byte grid. If 10 different packet sizes all sit on a 16-byte grid, the chance of that happening with GCM is (1/4)¹⁰, about 1 in a million. The analyzer calculates this probability (Bayesian inference). It was **100% correct on all 227 sessions** where it reached a decision. If there are too few distinct sizes (for example a VoIP call where every packet is the same size), it says "undecided" instead of guessing.
+- **From encrypted ESP (AI, no training needed):** each cipher pads packets differently, so the *set* of packet sizes gives it away. GCM packets fall on a 4-byte grid, while CBC packets all fall on a 16-byte grid. If 10 different packet sizes all sit on a 16-byte grid, the chance of that happening with GCM is (1/4)¹⁰, about 1 in a million. The analyzer calculates this probability (Bayesian inference). It was **100% correct on all 291 samples** where it reached a decision. If there are too few distinct sizes (for example a VoIP call where every packet is the same size), it says "undecided" instead of guessing.
 
 ---
 
@@ -252,7 +252,8 @@ The same rekeys also reveal the **SA lifetime** (key lifetime), which IKEv2 neve
 | **Real applications:** ISCX VPN-nonVPN 2016 public dataset (University of New Brunswick) | Real **Skype, Facebook and Hangouts chat and calls**, YouTube, Netflix, Vimeo, Spotify, email, SFTP and FTPS, used by real people | 1,116 windows from 30 captures |
 
 **How we detect it.** A **RandomForest AI model** looks at 59 statistics of the encrypted packets (sizes, timing, direction, bursts, idle gaps) and predicts the class with a probability. Accuracy:
-- **83.2% on real applications**, measured strictly: every capture is held out once, so the model never saw any part of a test capture.
+- **About 79–81% on real applications** (81.3% ± 2.1% over 5 splits), measured strictly: every capture is held out, so the model never saw any part of a test capture.
+- **Real WhatsApp and Gmail** through a phone's VPN, never used for training: 5 of 9 recordings correct (chat, voice call, video call and 2 emails). Modern phone apps differ from the 2016 training apps, so more phone recordings are the next step.
 - **100%** on the 16 strongSwan test captures.
 - Weakest class: **Email (26%)**, because there are only 2 email captures to learn from.
 
@@ -264,8 +265,8 @@ The same rekeys also reveal the **SA lifetime** (key lifetime), which IKEv2 neve
 
 | Requirement | Meaning in one line | Implemented | Where | Detected by the analyzer |
 |---|---|---|---|---|
-| Tunnel mode | Whole packet encrypted, real addresses hidden | ✅ | 13 strongSwan scenarios + lab profiles | Observed (AH/ESP-NULL) or AI, 97% |
-| Transport mode | Only the payload encrypted, real addresses visible | ✅ | capture_003, 010, 012 + lab profiles | Observed or AI, 97%; raises META-001 |
+| Tunnel mode | Whole packet encrypted, real addresses hidden | ✅ | 13 strongSwan scenarios + lab profiles | Observed (AH/ESP-NULL) or AI, about 93% |
+| Transport mode | Only the payload encrypted, real addresses visible | ✅ | capture_003, 010, 012 + lab profiles | Observed or AI, about 93%; raises META-001 |
 | AES-128 | 128-bit key | ✅ | capture_002, 004, 005, 017 | Observed, 100% |
 | AES-256 | 256-bit key | ✅ | capture_001, 003, 006–013, 015, 016 | Observed, 100% |
 | AES-GCM | Modern all-in-one encryption + integrity | ✅ | Most scenarios | Observed 100%; AI 100% when decided |
@@ -273,7 +274,7 @@ The same rekeys also reveal the **SA lifetime** (key lifetime), which IKEv2 neve
 | Different DH groups | Key-agreement strength | ✅ DH2, 14, 19, 20 | capture_005, 001, 002, 007… | Observed, 100%; weak group raises CRYPTO-001 |
 | PFS on/off | Fresh keys on each rekey | ✅ | capture_006, 015, 016, 017… | Inferred from rekey size, 3/3 |
 | IPv4 / IPv6 | IP version | ✅ | capture_007 (IPv6), the rest IPv4 | Observed, 100% |
-| VoIP, e-mail, web, ICMP, video | Traffic inside the tunnel | ✅ | Lab (374) + real apps (1,116) | AI: 83.2% real apps, 100% testbed |
+| VoIP, e-mail, web, ICMP, video | Traffic inside the tunnel | ✅ | Lab (374) + real apps (1,116) | AI: about 79–81% real apps, 100% testbed, 5/9 real phone apps |
 | WhatsApp | Messaging-app traffic | ⚠️ Similar apps (Skype, Facebook, Hangouts) covered; WhatsApp itself pending | — | Would be classified as Chat or VoIP |
 | *Extra:* AH, ESP-NULL, 3DES, NAT-T, IKEv1, rekeying, mixed and no-IPsec traffic | Weak and edge cases | ✅ | capture_005, 008–017 | All 100% on the testbed |
 

@@ -11,7 +11,7 @@ The analyzer is evaluated against captures whose true configuration is known, be
 
 ## Results on the 17 strongSwan captures (2026-09-26)
 
-Measured with the current models (`combined-20260926T150801`, protocol inference retrained on 19 profiles). Scenarios: IKEv1 and IKEv2; tunnel and transport; IPv4 and IPv6; NAT-T; PFS on and off; AES-GCM, AES-CBC and ESP-NULL; AH; rekeying; mixed traffic; one capture with no IPsec.
+Measured with the current models (`combined-20260928T173414`, protocol inference retrained with the WhatsApp phone recordings). Scenarios: IKEv1 and IKEv2; tunnel and transport; IPv4 and IPv6; NAT-T; PFS on and off; AES-GCM, AES-CBC and ESP-NULL; AH; rekeying; mixed traffic; one capture with no IPsec.
 
 | Check | Result |
 |---|---|
@@ -64,4 +64,4 @@ cd backend
 
 ## ML evaluation
 
-See [model-card.md](model-card.md). The key figures are **83.2%** group cross-validated accuracy on real-application ISCX traffic (87.4% over all sources), **97.0%** for mode inference and **100%** for ESP cipher inference when it decides. A random window split would report 93.1% on ISCX for the same traffic model, which is why this project does not use one.
+See [model-card.md](model-card.md). The key figures, each the mean ± spread over 5 different group splits, are **81.3% ± 2.1%** on real-application ISCX traffic (86.0% ± 1.6% over all sources), **92.9% ± 2.6%** for mode inference and **100%** for ESP cipher inference when it decides. On 9 real WhatsApp and Gmail recordings through a phone's IKEv2 VPN, which the traffic model never trained on, 5 of 9 whole captures are classified correctly (low confidence), the mode model is 98.4% right and the cipher inference 100%. A random window split would report 93.1% on ISCX for the same traffic model, which is why this project does not use one.

@@ -34,45 +34,45 @@ The figures below are for the models trained on 2026-09-26. Retraining rewrites 
 
 Total: 1,490 rows in 49 groups.
 
+**Independent real-world test set (never used to train this model):** 9 recordings of real apps on an Android phone's built-in IKEv2 client through our strongSwan server (`testbed/scripts/record_real_app.py`): 4 WhatsApp (voice call, chat, video call, file transfer) and 5 Gmail. Each is cut into 15 s windows (69 in total), like the ISCX captures.
+
+Why these recordings are a test set rather than training data: adding them to training lowered real-app accuracy from 79.1% to 74.1–74.4% (mean over 8 group splits), with or without windowing. Their classes don't line up with the ISCX training data: a WhatsApp video call is two-way and steady, while ISCX "Video" is one-way streaming; a Gmail session mixes attachment bursts with idle reading. They are used to train the mode model instead, where the label (tunnel) is unambiguous.
+
 ### Evaluation protocol
 
-- **5-fold StratifiedGroupKFold** over the combined data: every capture or VPN configuration is held out once and never split across train and test. This is the headline figure and the one the confidence score uses (`cv_accuracy`).
-- **A 70/15/15 group-level hold-out** within each source, reported alongside.
-- **A random window-level split**, reported only to show how much it overstates accuracy (windows of one recording on both sides).
+- **5-fold StratifiedGroupKFold, repeated over 5 different random group splits.** Every capture or VPN configuration is held out once per split, and never appears on both sides. The headline figure is the **mean ± standard deviation over splits**; the confidence score uses the mean (`cv_accuracy`).
+- **Why repeated.** Some classes rest on very few recordings (ISCX has two e-mail captures). Which recordings land in the same test fold moves accuracy by several points: over 8 splits, ISCX accuracy ranged from 73% to 83% for the *same* model and data. A single split can therefore look better or worse than the model really is.
+- **The independent real-world test** is reported per recording (majority vote of its windows) and per window, and, as the analyzer does it, on each whole capture.
+- **A 70/15/15 group-level hold-out** within each source is reported alongside.
+- **A random window-level split** is reported only to show how much it overstates accuracy (windows of one recording on both sides).
 
-### Results (combined RandomForest, `combined-20260926T150801`)
+### Results (combined RandomForest, `combined-20260928T183310`)
 
 | Measure | Value |
 |---|---|
-| Group CV accuracy, all sources | **87.4%** (macro-F1 0.884) |
-| Group CV accuracy, ISCX real apps | **83.2%** (macro-F1 0.751) |
+| Group CV accuracy, **ISCX real apps** | **81.3% ± 2.1%** (worst split 78.4%, best 83.6%) |
+| Group CV accuracy, all sources | 86.0% ± 1.6% (macro-F1 0.868 ± 0.016) |
 | Group CV accuracy, Linux lab sessions | 100% |
-| Group CV accuracy, strongSwan sessions | 100% |
+| Group CV accuracy, strongSwan sessions | 98.8% ± 2.6% |
 | Random window split, ISCX (leaky, for comparison only) | 93.1% |
-| Single 70/15/15 hold-out, ISCX part | 46.9% (only 5 test captures; see below) |
+| **Real phone apps, whole capture** (as the analyzer classifies an upload) | **5 of 9 (56%)**: WhatsApp chat, voice call and video call, and 2 of 5 Gmail; confidence 21–45% |
+| Real phone apps, per 15 s window | 20% of windows; 2 of 9 recordings by window vote |
 
-RandomForest (CV macro-F1 0.884) was selected over XGBoost (0.873) on cross-validation.
+Over 8 group splits on the same training data, ISCX accuracy averaged 79.1% ± 3.5%. So about **79–81%** is the fair real-app figure; single splits range from 73% to 84%.
 
-Real-application (ISCX) results per class, group CV:
+RandomForest (CV macro-F1 0.868) and XGBoost (0.864) were effectively tied; RandomForest was selected on mean macro-F1.
 
-| Class | Precision | Recall | Captures |
-|---|---|---|---|
-| Chat | 0.78 | 0.97 | 10 |
-| VoIP | 0.97 | 0.83 | 7 |
-| Video | 0.90 | 0.87 | 5 |
-| File-Transfer | 0.72 | 0.72 | 6 |
-| Email | 0.75 | 0.26 | 2 |
+Real-application (ISCX) recall per class, first split: Chat 0.97, Video 0.87, VoIP 0.83, File-Transfer 0.72, Email 0.26.
 
 The most important features are the share of 128–256-byte packets, downlink size variation, the largest burst, inter-arrival variation, burst count and the gap between bursts. Together they describe traffic *behaviour*, not the cipher or the addresses.
 
-**Why the hold-out figure is lower.** The single hold-out puts only 5 ISCX captures in the test set. One of them is a VoIP call whose windows are mostly predicted as Chat (37 of 49), and that one capture decides the score. Cross-validation holds out every capture once, so it is the stable figure, and it is the one reported and used by the confidence score.
-
-**What changed from the previous model** (`combined-20260926T112543`: ISCX 76.6%, all 79.7%): 9 temporal-pattern features were added (burst bytes, inter-burst gaps, per-second variation, active-second share), and the lab sessions grew from 8 to 17 VPN profiles. Video recall on real apps rose from 0.40 to 0.87.
+**History.** An earlier single-split figure of 83.2% on ISCX was the best of several splits, not a typical one. Before that (`combined-20260926T112543`), adding 9 temporal-pattern features and growing the lab from 8 to 17 VPN profiles lifted real-app Video recall from 0.40 to about 0.7–0.9, depending on the split.
 
 ### Known limitations
 
 - **Email** has only two ISCX VPN captures. Most email windows are predicted as Chat (35 of 80), because both are sparse, small-packet exchanges. Importing the ISCX non-VPN captures (`python -m app.ml.iscx --include-nonvpn`) adds four more email captures.
 - **File-Transfer vs Video.** Buffered streaming fetches large chunks and resembles bulk download (15–16 windows each way).
+- **Modern phone apps (domain shift).** On real WhatsApp and Gmail recorded through a phone's IKEv2 VPN, the model gets 5 of 9 whole captures right with low confidence: today's mobile apps behave differently from the 2016 desktop apps in ISCX. More labelled phone recordings per class are needed before they can join training without lowering the ISCX result.
 - **ISCX is 2016 OpenVPN traffic** converted to ESP sizes. The timing and direction are real; the ESP framing is computed. Modern applications (QUIC, HTTP/3) may behave differently.
 - **Lab traffic comes from generators** (`testbed/scripts/traffic.py`), so the 100% lab figures measure separability of those generators, not real-world accuracy.
 - **Out-of-distribution flows** can be misclassified. The previous model missed `capture_010` (ESP-NULL transport mode, 126-byte packets); the current model classifies all 16 IPsec evaluation captures correctly, because the lab sessions now include NULL and transport profiles.
@@ -85,8 +85,8 @@ The most important features are the share of 128–256-byte packets, downlink si
 1. **Physical rule** (`method: physical-bound`). After removing the inferred ESP overhead, an inner packet under 28 bytes cannot hold an IPv4 + transport header, so the mode is transport. Reported confidence 0.99.
 2. **Otherwise a RandomForest** trained on lab sessions with known mode, using the 18 ESP-structure features (inner-size percentiles, the share of inner sizes matching a TCP ACK with or without an inner IP header) plus traffic context.
 
-- **Training data:** lab sessions from 17 VPN profiles (GCM, CBC-SHA1/SHA256, 3DES, NULL; tunnel and transport; IPv4 and IPv6; NAT-T). ISCX windows are excluded because their ESP framing is synthetic.
-- **Evaluation:** 5-fold group CV by VPN profile over 370 sessions from 19 profiles gives **97.0%** (recall Tunnel 0.98, Transport 0.96). 10 sessions were decided by the physical rule. The accuracy is stored in the artifact as `cv_accuracy` and shown with every prediction.
+- **Training data:** lab sessions from 17 VPN profiles (GCM, CBC-SHA1/SHA256, 3DES, NULL; tunnel and transport; IPv4 and IPv6; NAT-T), the strongSwan sessions, and the 9 real phone recordings (WhatsApp and Gmail, tunnel) as 15 s windows. ISCX windows are excluded because their ESP framing is synthetic.
+- **Evaluation:** 5-fold group CV, repeated over 5 splits, over 434 samples (lab sessions, strongSwan sessions and 69 windows of the 9 real phone recordings) gives **92.9% ± 2.6%** (range 88.7–95.4%); 10 sessions were decided by the physical rule. By source: lab 92.2%, strongSwan 84.7%, **real phone recordings 98.4%** (before they were added, 0 of 4 WhatsApp recordings were predicted Tunnel). The mean is stored as `cv_accuracy` and shown with every prediction.
 - **Limitations:** transport mode carrying only large packets gives the rule nothing to work with, so it falls to the RandomForest. Encrypted IPv6-in-IPv4 tunnels are rare in the training data.
 
 ## 3. ESP cipher inference
@@ -95,12 +95,12 @@ A closed-form Bayesian test over the RFC 4303 length lattice; see [methodology.m
 
 - **Families:** AEAD (AES-GCM / ChaCha20-Poly1305); AES-CBC + HMAC-SHA1-96; AES-CBC + HMAC-SHA2-256-128; 64-bit block (3DES/Blowfish) + HMAC-SHA1-96. ESP-NULL is read directly.
 - **Abstains** when fewer than 4 distinct ESP lengths are seen (constant-size VoIP or ping).
-- **Results:** 100% correct on all 227 decided lab sessions (61% of 370; the rest had too few distinct lengths):
+- **Results:** 100% correct on all 291 decided samples (67%, including every window of the real phone recordings; the rest had too few distinct lengths):
 
   | Family | Correct / decided | Sessions |
   |---|---|---|
   | AEAD (AES-GCM) | 89 / 89 | 158 |
-  | AES-CBC + HMAC-SHA2-256-128 | 49 / 49 | 87 |
+  | AES-CBC + HMAC-SHA2-256-128 | 113 / 113 | 151 |
   | AES-CBC + HMAC-SHA1-96 | 24 / 24 | 42 |
   | 64-bit block (3DES) + HMAC-SHA1-96 | 24 / 24 | 42 |
   | ESP-NULL (read directly) | 41 / 41 | 41 |
