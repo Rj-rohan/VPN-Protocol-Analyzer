@@ -5,7 +5,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       strongswan-charon strongswan-swanctl libcharon-extra-plugins \
       libstrongswan-standard-plugins libstrongswan-extra-plugins \
-      iproute2 iputils-ping tcpdump procps python3 \
+      iproute2 iputils-ping tcpdump procps python3 iptables \
  && rm -rf /var/lib/apt/lists/*
 
 COPY strongswan/strongswan.conf /etc/strongswan.conf

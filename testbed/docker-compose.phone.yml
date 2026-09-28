@@ -1,0 +1,31 @@
+# Road-warrior VPN server for recording real phone apps (e.g. WhatsApp) through IPsec.
+# A phone's built-in IKEv2 client connects to this laptop on UDP 500/4500; the server
+# forwards its traffic to the internet and tcpdump records the encrypted IKE/ESP.
+# Driven by scripts/record_real_app.py; see docs/whatsapp-live.md.
+name: ipsec-phone
+
+services:
+  vpn:
+    image: ipsec-testbed-strongswan
+    build:
+      context: .
+      dockerfile: strongswan/Dockerfile
+    hostname: vpn
+    cap_add: [NET_ADMIN, NET_RAW]
+    sysctls:
+      net.ipv4.ip_forward: 1
+    ports:
+      - "500:500/udp"
+      - "4500:4500/udp"
+    # NAT the phone's virtual addresses to the internet and clamp TCP MSS so pages do not
+    # stall inside the UDP-encapsulated tunnel, then run charon in the foreground.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        iptables -t nat -A POSTROUTING -s 10.10.10.0/24 -o eth0 -j MASQUERADE &&
+        iptables -t mangle -A FORWARD -s 10.10.10.0/24 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1300 &&
+        exec /usr/lib/ipsec/charon
+    volumes:
+      - ./generated/phone:/etc/swanctl/conf.d
+      - ../data/raw/traffic_sessions:/sessions
