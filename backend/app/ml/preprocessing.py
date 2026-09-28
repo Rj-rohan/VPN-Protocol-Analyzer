@@ -72,13 +72,20 @@ def load_synthetic(path: Path) -> tuple[pd.DataFrame, ValidationReport]:
     return frame, report
 
 
-def session_features(pcap: Path) -> dict[str, float]:
-    """Traffic and ESP-structure features for one session capture (metadata pass only; sessions carry no IKE)."""
+# Long real-application recordings (minutes) are cut into windows like the ISCX captures, so every training
+# sample covers a similar span: count-type features (packets, bytes, bursts, duration) of a 2-minute recording
+# would otherwise sit far outside the 8-20 s lab sessions and 15 s ISCX windows. Windows of one recording keep
+# the recording's group, so cross-validation never splits a recording.
+WINDOWED_ORIGINS = {"real_app_phone_ikev2"}
+WINDOW_SECONDS = 15.0
+WINDOW_MIN_PACKETS = 5
+WINDOW_MAX = 40
+
+
+def _features(packets: list) -> dict[str, float]:
     from app.packet.esp_structure import ESP_FEATURES, esp_structure
     from app.packet.traffic import extract_traffic_metadata
-    from app.packet.tshark import TSharkService
 
-    packets = TSharkService().packet_records(pcap)
     structure = esp_structure(packets)
     measured = structure["features"]
     cipher = structure.get("cipher") or {}
@@ -88,45 +95,72 @@ def session_features(pcap: Path) -> dict[str, float]:
             "esp_cipher_inferred": cipher.get("family") if cipher.get("status") != "ambiguous" else None}
 
 
+def session_features(pcap: Path) -> dict[str, float]:
+    """Traffic and ESP-structure features for one session capture (metadata pass only; sessions carry no IKE)."""
+    from app.packet.tshark import TSharkService
+
+    return _features(TSharkService().packet_records(pcap))
+
+
+def window_features(pcap: Path, seconds: float = WINDOW_SECONDS) -> list[dict[str, float]]:
+    """Features of each `seconds`-long window of a long recording's ESP flow (same windowing as the ISCX import)."""
+    from app.ml.iscx import windows
+    from app.packet.tshark import TSharkService
+
+    flow = [p for p in TSharkService().packet_records(pcap) if (p.esp_spi or p.ah_spi) and p.timestamp is not None]
+    return [_features(window) for window in windows(flow, seconds, WINDOW_MIN_PACKETS, WINDOW_MAX)]
+
+
 def load_sessions(directory: Path, cache: Path | None = None, workers: int = 6) -> tuple[pd.DataFrame, ValidationReport]:
-    """Labelled testbed sessions (pcap + json). Parsed features are cached by pcap hash; new files are parsed in parallel."""
+    """Labelled sessions (pcap + json). Parsed features are cached by pcap hash; new files are parsed in parallel.
+
+    Recordings from WINDOWED_ORIGINS become one row per window; all others one row per session."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    cached: dict[str, dict] = {}
+    from app.packet.esp_structure import ESP_FEATURES
+
+    cached: dict[str, list[dict]] = {}
     if cache and cache.exists():
         previous = pd.read_csv(cache)
         # A cache written before the feature set changed is ignored and rebuilt.
-        from app.packet.esp_structure import ESP_FEATURES
-
         if set(FULL_FEATURES) | set(ESP_FEATURES) | {"esp_cipher_inferred"} <= set(previous.columns):
-            cached = {row["sha256"]: row for row in previous.to_dict("records")}
+            if "cache_key" not in previous:
+                previous["cache_key"] = previous["sha256"]
+            for row in previous.to_dict("records"):
+                cached.setdefault(row["cache_key"], []).append(row)
+
     labelled = []
     for label_path in sorted(directory.glob("*.json")):
         label = json.loads(label_path.read_text(encoding="utf-8"))
         pcap = directory / label["pcap_filename"]
         if pcap.exists():
-            labelled.append((label, pcap, hashlib.sha256(pcap.read_bytes()).hexdigest()))
+            digest = hashlib.sha256(pcap.read_bytes()).hexdigest()
+            windowed = label.get("dataset_origin") in WINDOWED_ORIGINS
+            labelled.append((label, pcap, digest, f"{digest}:w" if windowed else digest, windowed))
 
-    pending = [(pcap, digest) for _, pcap, digest in labelled if digest not in cached]
+    pending = [(pcap, key, windowed) for _, pcap, _, key, windowed in labelled if key not in cached]
     if pending:
         print(f"Extracting traffic features from {len(pending)} new capture(s) with {workers} parallel TShark workers "
               f"({len(labelled) - len(pending)} cached)...", flush=True)
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(session_features, pcap): digest for pcap, digest in pending}
+            futures = {pool.submit(window_features if windowed else lambda p: [session_features(p)], pcap): key
+                       for pcap, key, windowed in pending}
             for done, future in enumerate(as_completed(futures), start=1):
-                cached[futures[future]] = {**future.result(), "sha256": futures[future]}
+                cached[futures[future]] = [{**features, "window": index} for index, features in enumerate(future.result())]
                 if done % 10 == 0 or done == len(pending):
                     print(f"  {done}/{len(pending)}", flush=True)
 
     rows = []
-    for label, _, digest in labelled:
-        row = dict(cached[digest])
-        row.update({"session_id": label["session_id"], LABEL: label["traffic"], GROUP: label["group"], "sha256": digest,
-                    "dataset_origin": label.get("dataset_origin", "unknown"),
-                    # Ground truth for the protocol-inference models (mode and ESP cipher family).
-                    "mode": (label.get("mode") or "").capitalize() or None, "esp_proposal": label.get("esp_proposal"),
-                    "ip_version": label.get("ip_version")})
-        rows.append(row)
+    for label, _, digest, key, windowed in labelled:
+        for cached_row in cached[key]:
+            row = dict(cached_row)
+            suffix = f"_w{int(row.get('window') or 0):02d}" if windowed else ""
+            row.update({"session_id": label["session_id"] + suffix, LABEL: label["traffic"], GROUP: label["group"],
+                        "sha256": digest, "cache_key": key, "dataset_origin": label.get("dataset_origin", "unknown"),
+                        # Ground truth for the protocol-inference models (mode and ESP cipher family).
+                        "mode": (label.get("mode") or "").capitalize() or None, "esp_proposal": label.get("esp_proposal"),
+                        "ip_version": label.get("ip_version")})
+            rows.append(row)
     frame = pd.DataFrame(rows)
     if frame.empty:
         return frame, ValidationReport(0, 0, errors=[f"No labelled sessions found in {directory}"])
@@ -138,7 +172,6 @@ def load_sessions(directory: Path, cache: Path | None = None, workers: int = 6) 
     if len(too_small):
         report.warnings.append(f"{len(too_small)} session(s) have fewer than 10 ESP packets")
     return frame, report
-
 
 def group_split(frame: pd.DataFrame, seed: int = 26160, fractions: tuple[float, float, float] = (0.70, 0.15, 0.15)) -> dict[str, pd.DataFrame]:
     """Split whole groups (configurations/captures) into train/validation/test; no group spans two splits."""

@@ -65,3 +65,38 @@ def test_prediction_is_labelled_and_caveated() -> None:
     assert "not decrypted" in result["caveat"]
     if result["model"]["training_source"].startswith("synthetic"):
         assert "synthetic" in result["caveat"]
+
+
+def test_long_phone_recordings_become_windows_in_one_group(tmp_path: Path, monkeypatch) -> None:
+    import json
+
+    import app.ml.preprocessing as preprocessing
+    from app.ml.features import FULL_FEATURES
+    from app.packet.esp_structure import ESP_FEATURES
+
+    def fake(packets_hint: float) -> dict:
+        return {name: packets_hint for name in FULL_FEATURES + ESP_FEATURES} | {"esp_cipher_inferred": None} | {
+            "packet_count": packets_hint, "uplink_ratio": 0.5, "bytes_up": packets_hint, "bytes_down": packets_hint,
+            "bytes_total": 2 * packets_hint, "esp_inner_min": 30.0}
+
+    monkeypatch.setattr(preprocessing, "session_features", lambda pcap: fake(50.0))
+    monkeypatch.setattr(preprocessing, "window_features", lambda pcap: [fake(40.0), fake(41.0), fake(42.0)])
+    for name, origin, traffic in (("lab_chat_00", "linux_xfrm_netns_capture", "Chat"),
+                                  ("gmail_email_00", "real_app_phone_ikev2", "Email")):
+        (tmp_path / f"{name}.pcap").write_bytes(name.encode())
+        (tmp_path / f"{name}.json").write_text(json.dumps({"session_id": name, "pcap_filename": f"{name}.pcap", "traffic": traffic,
+                                                           "group": name, "dataset_origin": origin, "mode": "tunnel"}))
+    cache = tmp_path / "cache.csv"
+    frame, report = preprocessing.load_sessions(tmp_path, cache=cache, workers=1)
+
+    assert report.ok
+    phone = frame[frame["dataset_origin"] == "real_app_phone_ikev2"]
+    assert list(phone["session_id"]) == ["gmail_email_00_w00", "gmail_email_00_w01", "gmail_email_00_w02"]
+    assert set(phone["group"]) == {"gmail_email_00"}  # one recording, one group: never split by cross-validation
+    assert list(frame[frame["dataset_origin"] == "linux_xfrm_netns_capture"]["session_id"]) == ["lab_chat_00"]
+
+    # A second load reuses the cache instead of parsing the captures again.
+    monkeypatch.setattr(preprocessing, "window_features", lambda pcap: (_ for _ in ()).throw(AssertionError("re-parsed")))
+    monkeypatch.setattr(preprocessing, "session_features", lambda pcap: (_ for _ in ()).throw(AssertionError("re-parsed")))
+    again, _ = preprocessing.load_sessions(tmp_path, cache=cache, workers=1)
+    assert sorted(again["session_id"]) == sorted(frame["session_id"])
