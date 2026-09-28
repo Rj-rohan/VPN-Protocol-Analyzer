@@ -52,6 +52,19 @@ sudo python3 testbed/scripts/netns_sessions.py --repeats 3
 
 The two namespaces are joined by a veth pair (MTU 1500). The kernel encrypts the traffic with manually keyed ESP SAs, and the 17 profiles cover AES-GCM, AES-CBC with SHA-256 or SHA-1, 3DES and ESP-NULL, tunnel and transport mode, NAT-T and IPv6. `--profiles <name> ...` re-records only the named profiles (existing sessions with the same name are overwritten). Every captured packet is real kernel-generated ESP. The captures contain no IKE, because the traffic classifier only uses the ESP data plane. Sessions are labelled `dataset_origin: linux_xfrm_netns_capture` with `group` set to the profile name.
 
+## Real phone apps through a real VPN (`record_real_app.py`)
+
+For real application traffic such as WhatsApp, a strongSwan road-warrior server (`docker-compose.phone.yml`) accepts a phone's built-in IKEv2/IPsec PSK client on UDP 500/4500 and NATs its traffic to the internet. Each recording is saved to `data/raw/traffic_sessions/` as `<app>_<activity>_<nn>.pcap` plus a `.json` label, with `dataset_origin: real_app_phone_ikev2` and the IKE/ESP settings the phone actually negotiated.
+
+```bat
+python testbed\scripts\record_real_app.py serve --build     :: first time; prints the phone settings
+python testbed\scripts\record_real_app.py status
+python testbed\scripts\record_real_app.py record --activity voice-call --seconds 120
+python testbed\scripts\record_real_app.py stop
+```
+
+Full procedure, including the live dashboard demo and troubleshooting: [docs/whatsapp-live.md](../docs/whatsapp-live.md).
+
 ## Per-scenario steps
 
 1. Write `swanctl` configs for both peers into `testbed/generated/` (gitignored), with a fresh random pre-shared key.
